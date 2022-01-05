@@ -1,0 +1,255 @@
+---
+title: "Bordeau mixture analysis"
+output:
+  rmdformats::robobook:
+    highlight: kate
+editor_options: 
+  chunk_output_type: inline
+---
+
+<style type="text/css">
+.main-container {
+  max-width: 1800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+  body{
+  font-size: 10pt;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+```
+
+```{r include=FALSE}
+pacman::p_load(tidyverse, janitor, metafor)
+load("data/data.RData")
+```
+
+## Only Bordeaux mixture against non-treated check (overall)
+
+### Control efficacy
+
+```{r}
+mv_inc_BM <- rma.mv(log_inc, vi,
+                     mods = ~treatment,
+                     random = list(~treatment | trial),
+                     struct = "HCS",
+                     method = "ML",
+                     data = dat_bord)
+mv_inc_BM
+```
+
+
+```{r}
+efficacy_BM <- data.frame(cbind(
+  (1 - exp(mv_inc_BM$b)) * 100,
+  (1 - exp(mv_inc_BM$ci.ub)) * 100),
+  (1 - exp(mv_inc_BM$ci.lb)) * 100
+  )  %>% 
+  set_names("control", "control_inf", "control_sup") %>% 
+  rownames_to_column("treatment") %>% 
+  mutate(treatment = str_replace(treatment, "treatment", "")) %>% 
+  filter(treatment != "intrcpt") 
+
+efficacy_BM
+```
+
+### Yield response 
+
+```{r}
+mv_yield_BM <- rma.mv(log_yield, log_var_yield,
+                      mods = ~treatment,
+                      random = list(~treatment | trial),
+                      method = "ML",
+                      struct = "HCS",
+                      data = dat_bord)
+mv_yield_BM
+```
+
+```{r}
+yield_BM <- data.frame(cbind((exp(mv_yield_BM$b)-1)*100, 
+                             (exp(mv_yield_BM$ci.lb)-1)*100,
+                             (exp(mv_yield_BM$ci.ub)-1)*100)) %>%  
+  set_names("yield_resp", "yield_resp.inf", "yield_resp.sup") %>% 
+  rownames_to_column("treatment") %>% 
+  mutate(treatment = str_replace(treatment, "treatment", "")) %>% 
+  filter(treatment != "intrcpt")
+
+yield_BM 
+```
+
+Table overall effect of BM in control efficacy and yield response
+
+```{r}
+inc_yield_BM <- inner_join(dat_bord %>% count(treatment),
+                           full_join(efficacy_BM, yield_BM)) %>%
+  mutate_if(is.numeric, round, 2)
+
+inc_yield_BM %>%   
+  knitr::kable()
+```
+
+## Disease pressure as moderator variable
+
+```{r}
+dat_bord %>% 
+  ggplot()+
+  aes(x=treatment, y =yield)+
+  geom_point()+
+  geom_line(aes(group=trial))+
+  facet_wrap("inc_check_class")+
+  theme_bw()
+
+dat_bord %>% 
+  group_by(treatment, inc_check_class) %>% 
+  summarise(y=mean(yield))
+
+```
+
+### Yield response 
+
+```{r}
+mv_yield_BM_dispress <- rma.mv(log_yield, log_var_yield,
+                      mods = ~treatment * inc_check_class,
+                      random = list(~treatment | trial),
+                      method = "ML",
+                      struct = "UN",
+                      data = dat_bord)
+summary(mv_yield_BM_dispress)
+```
+
+```{r}
+anova(mv_yield_BM_dispress, btt=3:4)
+```
+
+```{r}
+dat_bord %>% 
+  group_by(inc_check_class, treatment) %>% 
+  summarise(y=mean(yield))
+```
+
+```{r}
+net_D_dl <- rma.mv(yield, var_yield,
+                   mods = ~treatment * inc_check_class,
+                   random = list(~treatment | trial),
+                   method = "ML",
+                   struct = "UN",
+                   # struct = "UN",
+                   # control = list(optimizer = "nlm"),
+                   data = dat_bord)
+```
+
+```{r}
+res_D_dl <-
+  with(net_D_dl,
+       data.frame(
+         Dis_level = rep(c("Low_DP", "High_DP"), e=1),
+         fungi = gsub("fungic","", row.names(net_D_dl$b)[2]),
+         D = round(c(b[2], b[2] + b[4]),1),
+         SE = round(c(se[2], se[4]),2),
+         lower = round(c(ci.lb[2], b[2]+ci.lb[4]),2),   
+         upper = round(c(ci.ub[2], b[2]+ci.ub[4]),2),  
+         zval = round(c(zval[2], zval[4]),1),
+        pval = round(c(pval[2], pval[4]),3)
+       )) 
+res_D_dl
+```
+
+# Variety 
+
+Yield 
+
+```{r}
+dat_bord %>% 
+  ggplot()+
+  aes(x=variety, y =trial, col =factor(study))+
+  geom_point(aes(shape=inc_check_class))+
+  scale_shape_manual(values=c(25, 24))+
+  theme_bw()+
+  coord_flip()+
+  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=.5))+
+  labs(x="", col="study", shape = "Disease pressure", 
+       title = "Disease pressure")
+```
+
+```{r}
+dat %>%
+  distinct(trial, .keep_all = TRUE) %>%
+  count(variety) %>% 
+  filter(n>3) %>% 
+  pull(variety) -> vari
+
+dat_bord %>% 
+  filter(variety %in% vari) %>% 
+  droplevels()-> dat_bord_vari
+```
+
+```{r}
+dat_bord_vari %>% 
+  ggplot()+
+  aes(x=treatment, y =yield, col=inc_check_class)+
+  geom_point()+
+  geom_line(aes(group=trial))+
+  facet_wrap("variety")+
+  # scale_shape_manual(values=c(25, 24))+
+  theme_bw()
+
+dat_bord_vari %>% 
+  group_by(variety, treatment) %>% 
+  summarise(y=mean(yield))
+```
+
+
+```{r}
+mv_yield_BM_var <- rma.mv(log_yield, log_var_yield,
+                     mods = ~treatment*variety,
+                     random = list(~treatment | trial),
+                     struct = "HCS",
+                     method = "ML",
+                     data = dat_bord_vari)
+```
+
+```{r}
+mv_yield_BM_var
+anova(mv_yield_BM_var, btt=5:6)
+```
+
+```{r net_D_dl, eval=T}
+mv_D_BM_var <- rma.mv(yield, var_yield,
+                      mods = ~treatment*variety,
+                      random = list(~treatment | trial),
+                      struct= "UN", 
+                      method="ML",
+                      data= dat_bord_vari,
+                      control = list(optimizer="nlm"))
+```
+
+```{r net_D_dl anova}
+summary(mv_D_BM_var)
+anova(mv_D_BM_var, btt=5:6)
+
+dat_bord_vari %>% 
+  count(variety, treatment) %>% 
+  bind_cols(
+    as_tibble(
+      predict(mv_D_BM_var, 
+              newmods=rbind(
+                c(0,0,0,0,0), # SAGARA LOCAL/AA_CHECK 
+                c(1,0,0,0,0), # SAGARA LOCAL/BM1% 
+                
+                c(0,1,0,0,0), # SHRIWARDHAN/AA_CHECK 
+                c(1,1,0,1,0), # SHRIWARDHAN/BM1% 
+                
+                c(0,0,1,0,0), # SHRIWARDHAN/AA_CHECK 
+                c(1,0,1,0,1)  # SHRIWARDHAN/BM1%
+              )) 
+    )) %>% 
+  select(-(cr.lb:tau2.level))
+
+```
+
+So, the treatment-cultivar interaction effect can be interpreted as:
+the yield increase due to BM@1% is higher for SAGARA LOCAL and THIRTHAHALLI LOCAL, than for SHRIWARDHAN, which can represent a higher level of tolerance to the disease for the latter variety.
+

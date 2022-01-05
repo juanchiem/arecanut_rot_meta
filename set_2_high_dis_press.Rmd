@@ -1,0 +1,119 @@
+---
+title: "Set 2 - High disease pressure"
+output:
+  rmdformats::robobook:
+    highlight: kate
+---
+```{r echo=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+```
+
+```{r setup}
+pacman::p_load(tidyverse, janitor, metafor)
+load("data/data.RData")
+```
+
+
+```{r}
+dat2 %>% 
+  tabyl(treatment, trial) %>% 
+  knitr::kable()
+
+```
+
+## Disease control analysis
+
+Network meta-analysis model
+
+```{r eval=FALSE}
+dat2 %>% 
+  ggplot()+
+  aes(x=fct_reorder(treatment, -inc, mean), y =inc)+
+  geom_point(alpha=.5)+
+  stat_summary(fun=median, geom="crossbar", col="red")+
+  stat_summary(aes(label=..y.. %>% round(2)), 
+               fun=median, geom="text", size=4, 
+               vjust = 0)+
+  coord_flip()
+```
+
+```{r}
+mv_inc_highDP <- rma.mv(log_inc, vi,
+                     mods = ~treatment,
+                     random = list(~treatment | trial),
+                     struct = "HCS",
+                     method = "ML",
+                     data = dat2)
+```
+
+P-values addresses significance against the non-treated check
+
+```{r}
+mv_inc_highDP
+```
+
+
+```{r}
+# AIC(mv_inc_highDP)
+```
+
+```{r}
+control_highDP <- data.frame(cbind(
+  (1 - exp(mv_inc_highDP$b)) * 100,
+  (1 - exp(mv_inc_highDP$ci.ub)) * 100),
+  (1 - exp(mv_inc_highDP$ci.lb)) * 100
+  )  %>% 
+  set_names("control", "control_inf", "control_sup") %>% 
+  rownames_to_column("treatment") %>% 
+  mutate(treatment = str_replace(treatment, "treatment", "")) %>% 
+  filter(treatment != "intrcpt") 
+
+```
+
+```{r}
+control_highDP %>% 
+  # arrange(desc(control))%>% 
+  # tidy() %>%
+  knitr::kable()
+```
+
+## Comparison against Bordeaux mixture @ 1% 
+
+```{r}
+# check + 8 treatments 
+mat_highDP <- rbind(
+  c(0, 1, -1, 0, 0, 0, 0, 0, 0),   # BM1% vs CuClO
+  c(0, 1, 0, -1, 0, 0, 0, 0, 0),
+  c(0, 1, 0, 0, -1, 0, 0, 0, 0),
+  c(0, 1, 0, 0, 0, -1, 0, 0, 0),
+  c(0, 1, 0, 0, 0,  0,-1, 0, 0),
+  c(0, 1, 0, 0, 0, 0, 0, -1, 0),
+  c(0, 1, 0, 0, 0, 0, 0, 0, -1)
+)
+```
+
+```{r}
+anova(mv_inc_highDP, L=mat_highDP)
+```
+
+## Final plot
+
+```{r}
+control_highDP %>% 
+  ggplot() +
+  aes(x=fct_reorder(treatment, control, mean), y =control)+
+  geom_errorbar(aes(min = control_inf, max = control_sup),  
+                width=0, size = 0.8, color = "black", alpha = 0.35)+
+  geom_point(size= 3) + 
+  geom_text(aes(label=control %>% round(1)), vjust=-.5)+
+  coord_flip()+
+  labs(y = "Disease control (%)", x = "")+
+  theme_bw()+
+  theme(axis.text=element_text(size=10), 
+        axis.title=element_text(size=12, face = "bold"), 
+        legend.title = element_text(size=12, face = "bold"))
+```
+
+```{r}
+ggsave(last_plot(), file = "plots/highDP.tiff", scale=1.2, w=8, h=4, dpi=150)
+```

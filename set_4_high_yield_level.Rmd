@@ -1,0 +1,118 @@
+---
+title: "Set 4 - High yield level"
+output:
+  rmdformats::robobook:
+    highlight: kate
+---
+
+```{r echo=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+```
+
+```{r setup}
+pacman::p_load(tidyverse, janitor, metafor)
+load("data/data.RData")
+```
+
+```{r}
+dat4 %>% 
+  tabyl(treatment, trial) %>% 
+  knitr::kable()
+```
+
+```{r, eval=FALSE}
+dat4 %>% 
+  ggplot()+
+  aes(x=fct_reorder(treatment, yield, mean), y =yield)+
+  geom_point(alpha=.2)+
+  stat_summary(fun=median, geom="crossbar", col="red")+
+  stat_summary(aes(label=..y.. %>% round(2)),
+               fun=median, geom="text", size=4,
+               vjust = 0)+
+  coord_flip()
+```
+
+```{r}
+mv_yield_highYL <- rma.mv(log_yield, log_var_yield,
+  mods = ~treatment,
+  random = list(~treatment | trial),
+  method = "ML",
+  struct = "HCS",
+  data = dat4
+)
+
+mv_yield_highYL
+```
+
+## Yield response analysis
+
+Network meta-analysis
+
+```{r}
+yield_highYL <- inner_join(dat4 %>% count(treatment),
+                      data.frame(
+                      cbind((exp(mv_yield_highYL$b)-1)*100, 
+                             (exp(mv_yield_highYL$ci.lb)-1)*100,
+                             (exp(mv_yield_highYL$ci.ub)-1)*100)) %>% 
+  set_names("yield_resp", "yield_resp.inf", "yield_resp.sup") %>% 
+  rownames_to_column("treatment") %>% 
+  mutate(treatment = str_replace(treatment, "treatment", "")) %>% 
+  filter(treatment != "intrcpt"))%>% 
+  arrange(-yield_resp)
+```
+
+* P-values address significance against the non-treated check
+
+```{r}
+yield_highYL
+```
+
+## Comparison against Bordeaux mixture @ 1% 
+
+```{r}
+# Check + 15 treatments 
+mat_highYL <- rbind(
+  # 2 vs others
+  c(0, 1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  c(0, 1, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  c(0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  c(0, 1, 0, 0,  0,-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  c(0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+  c(0, 1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0),
+  c(0, 1, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0),
+  c(0, 1, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0),
+  c(0, 1, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0),
+  c(0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0),
+  c(0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0),
+  c(0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0),
+  c(0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0),
+  c(0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1)
+  )
+```
+
+```{r}
+anova(mv_yield_highYL, L=mat_highYL)
+```
+
+# Final plot
+
+```{r}
+yield_highYL %>% 
+  ggplot() +
+  aes(x=fct_reorder(treatment, yield_resp, mean), y =yield_resp)+
+  geom_errorbar(aes(min = yield_resp.inf, max = yield_resp.sup),  
+                width=0, size = 0.8, color = "black", alpha = 0.35)+
+  geom_point(size= 3) + 
+  geom_text(aes(label=yield_resp %>% round(1)), vjust=-.5)+
+  coord_flip()+
+  labs(y = "Yield response (%)", x = "") +
+  geom_vline(xintercept=0, col ="red") +
+  theme_bw()+
+  theme(axis.text=element_text(size=10), 
+        axis.title=element_text(size=12, face = "bold"), 
+        legend.title = element_text(size=12, face = "bold"))
+```
+
+```{r}
+ggsave(last_plot(), file = "plots/highYL.tiff", scale=1.2, w=8, h=4, dpi=150)
+```
